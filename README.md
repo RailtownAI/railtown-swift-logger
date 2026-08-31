@@ -69,7 +69,9 @@ try RailtownLogger.configure(
         maxBatchSize: 20,               // entries per upload
         maxBufferedEntries: 500,        // buffer cap; oldest dropped beyond it
         maxRetryAttempts: 5,            // delivery attempts before a batch is dropped
-        isInternalLoggingEnabled: false // SDK diagnostics via os.Logger
+        isInternalLoggingEnabled: false,// SDK diagnostics via os.Logger
+        flushTimeout: 5,                // seconds an explicit flush waits before giving up
+        observesAppLifecycle: true      // flush automatically on background/terminate
     )
 )
 ```
@@ -97,17 +99,32 @@ The stack trace is captured by the SDK (`Thread.callStackSymbols`) at the moment
 
 ## Flushing
 
-Uploads happen automatically (batch full, or `flushInterval` elapsed). To minimize loss when the app is suspended, flush on backgrounding:
+Uploads happen on their own: when a batch fills (`maxBatchSize`), when `flushInterval`
+elapses, and **automatically when the app backgrounds or terminates** — the SDK observes
+those notifications itself, so there is no lifecycle boilerplate to write. On iOS that is
+`didEnterBackground` and `willTerminate`; on macOS, where an app keeps running while
+unfocused, only `willTerminate` (flushing on every focus change would cost an upload per
+cmd-tab).
+
+Turn it off with `observesAppLifecycle: false` if your app manages this itself.
+
+You can still flush at a moment of your choosing:
 
 ```swift
-.onChange(of: scenePhase) { _, phase in
-    if phase == .background {
-        Task { await RailtownLogger.flush() }
-    }
-}
+await RailtownLogger.flush()              // bounded by options.flushTimeout (5s)
+await RailtownLogger.flush(timeout: 15)   // or pass your own bound
 ```
 
-Known limitation: entries still buffered when the process is killed are lost (no disk persistence yet).
+`flush` is always bounded. iOS allows roughly 30 seconds after backgrounding while a
+single request can itself take 30 seconds on a dead network, so an unbounded flush
+could not finish in the time the system gives it. When the deadline passes, the
+in-flight batch is **returned to the buffer** rather than dropped, and goes out on the
+next attempt.
+
+Known limitation: entries still buffered when the process dies are lost. The automatic
+flush runs asynchronously, so a process that exits promptly after `willTerminate` takes
+the pending upload with it, and a crash or watchdog kill delivers no notification at
+all — surviving those needs on-disk spooling, which is not implemented yet.
 
 ## RailtracksSwift integration
 

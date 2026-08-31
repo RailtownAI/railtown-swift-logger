@@ -42,10 +42,10 @@ import Testing
 
         dispatcher.stage(makeEntry("one"))
         dispatcher.stage(makeEntry("two"))
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await Task.sleep(seconds: 0.05)
         #expect(await httpClient.requestCount == 0)
 
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
         #expect(await httpClient.requestCount == 1)
         let request = try #require(await httpClient.requests.first)
         #expect(PayloadInspector.messages(in: request.body) == ["one", "two"])
@@ -60,7 +60,7 @@ import Testing
         }
 
         #expect(await eventually { await httpClient.requestCount >= 1 })
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
         #expect(await httpClient.requestCount == 1)
     }
 
@@ -78,7 +78,7 @@ import Testing
         let dispatcher = try makeDispatcher(httpClient: httpClient)
 
         dispatcher.stage(makeEntry())
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
 
         let requests = await httpClient.requests
         #expect(requests.count == 2)
@@ -92,7 +92,7 @@ import Testing
         let dispatcher = try makeDispatcher(httpClient: httpClient)
 
         dispatcher.stage(makeEntry())
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
 
         #expect(await httpClient.requestCount == 2)
     }
@@ -102,11 +102,11 @@ import Testing
         let dispatcher = try makeDispatcher(httpClient: httpClient)
 
         dispatcher.stage(makeEntry())
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
         #expect(await httpClient.requestCount == 1)
 
         // The rejected batch must not linger and resend.
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
         #expect(await httpClient.requestCount == 1)
     }
 
@@ -118,10 +118,10 @@ import Testing
         )
 
         dispatcher.stage(makeEntry())
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
         #expect(await httpClient.requestCount == 2)
 
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
         #expect(await httpClient.requestCount == 2)
     }
 
@@ -136,7 +136,7 @@ import Testing
         for index in 1...8 {
             dispatcher.stage(makeEntry("message-\(index)"))
         }
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
 
         let request = try #require(await httpClient.requests.first)
         #expect(PayloadInspector.messages(in: request.body) == [
@@ -152,7 +152,7 @@ import Testing
         let dispatcher = try makeDispatcher(httpClient: httpClient, flushInterval: interval)
 
         dispatcher.stage(makeEntry())
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
 
         #expect(await httpClient.requestCount == 1)
     }
@@ -164,7 +164,7 @@ import Testing
         for index in 1...5 {
             dispatcher.stage(makeEntry("message-\(index)"))
         }
-        await dispatcher.flush()
+        await dispatcher.flush(timeout: 30)
 
         let requests = await httpClient.requests
         let batchSizes = requests.map { PayloadInspector.messages(in: $0.body).count }

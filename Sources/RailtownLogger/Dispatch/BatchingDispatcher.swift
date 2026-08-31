@@ -11,8 +11,9 @@ protocol LogDispatching: Sendable {
     /// and the entry is guaranteed staged before the call returns.
     func stage(_ entry: LogEntry)
 
-    /// Delivers everything staged, waiting for completion — including retries.
-    func flush() async
+    /// Delivers everything staged, giving up after `timeout` seconds so a caller
+    /// under a suspension deadline is never blocked indefinitely.
+    func flush(timeout: TimeInterval) async
 }
 
 /// Actor owning all delivery state.
@@ -79,11 +80,28 @@ actor BatchingDispatcher: LogDispatching {
         Task { await self.entryStaged(count: count) }
     }
 
-    func flush() async {
+    func flush(timeout: TimeInterval) async {
         startDrainIfNeeded()
-        while let activeDrain = drainTask {
-            await activeDrain.value
+        guard let activeDrain = drainTask else { return }
+
+        // A watchdog cancels the drain at the deadline; the drain then unwinds
+        // quickly, returning its in-flight batch to the buffer.
+        //
+        // Awaiting the drain inside a task group would not work: `Task.value`
+        // ignores the awaiting task's cancellation, so the group could not
+        // return until the drain finished on its own — exactly what the timeout
+        // exists to avoid.
+        let watchdog = Task { [internalLog] in
+            try? await Task.sleep(seconds: timeout)
+            guard !Task.isCancelled else { return }
+            activeDrain.cancel()
+            internalLog.warning(
+                "Flush timed out after \(timeout)s — undelivered entries stay buffered."
+            )
         }
+        defer { watchdog.cancel() }
+
+        await activeDrain.value
     }
 
     // MARK: - Scheduling (actor-isolated)
@@ -99,7 +117,7 @@ actor BatchingDispatcher: LogDispatching {
     private func scheduleTimerIfNeeded() {
         guard timerTask == nil, drainTask == nil, !buffer.isEmpty else { return }
         timerTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(flushInterval * 1_000_000_000))
+            try? await Task.sleep(seconds: flushInterval)
             guard !Task.isCancelled else { return }
             self.timerDidFire()
         }
@@ -125,7 +143,7 @@ actor BatchingDispatcher: LogDispatching {
     // MARK: - Delivery
 
     private func drainBufferedEntries() async {
-        while true {
+        while !Task.isCancelled {
             let batch = buffer.removeBatch(upTo: maxBatchSize)
             guard !batch.isEmpty else { return }
             await send(batch)
@@ -155,6 +173,15 @@ actor BatchingDispatcher: LogDispatching {
                 outcome = .retryable
             }
 
+            // A cancelled flush must not lose the batch: it already left the buffer.
+            if Task.isCancelled {
+                buffer.prepend(batch)
+                internalLog.debug(
+                    "Flush cut short — returned \(batch.count) entries to the buffer."
+                )
+                return
+            }
+
             switch outcome {
             case .success:
                 internalLog.debug("Uploaded a batch of \(batch.count) entries.")
@@ -170,7 +197,15 @@ actor BatchingDispatcher: LogDispatching {
                     return
                 }
                 let delay = retryPolicy.delay(afterAttempt: attempt)
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                do {
+                    try await Task.sleep(seconds: delay)
+                } catch {
+                    buffer.prepend(batch)          // cancelled mid-backoff
+                    internalLog.debug(
+                        "Flush cut short during backoff — returned \(batch.count) entries."
+                    )
+                    return
+                }
                 attempt += 1
             }
         }
