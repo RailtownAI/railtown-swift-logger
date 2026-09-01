@@ -46,7 +46,7 @@ public final class ConductrTraceUploader: @unchecked Sendable {
         /// Parsed form of `apiKey`, shared with the rest of the SDK.
         let credentials: RailtownCredentials
 
-        /// `apiBaseURL` + `/observe/exchange`, validated at configure time.
+        /// `apiBaseURL` + `/api/observe/exchange`, resolved and validated at configure time.
         let exchangeURL: URL
     }
 
@@ -76,9 +76,9 @@ public final class ConductrTraceUploader: @unchecked Sendable {
     /// both uploaders are set up the same way and neither needs a key in source.
     ///
     /// - Parameters:
-    ///   - apiBaseURL: Conductr API base URL. `/observe/exchange` is appended, so it must stop
-    ///     at `/api`. Omit it to take the plist's `API_BASE_URL` entry instead; passing one here
-    ///     wins over the plist.
+    ///   - apiBaseURL: Conductr host, e.g. `cndr.railtown.ai` — the scheme is optional and the
+    ///     path is not yours to supply; see the `apiKey` overload. Omit it to take the plist's
+    ///     `API_BASE_URL` entry instead; passing one here wins over the plist.
     ///   - isInternalLoggingEnabled: Enables this type's diagnostics through `os.Logger`. Off by
     ///     default, matching ``RailtownOptions/isInternalLoggingEnabled``.
     ///   - bundle: Where to look for `Railtown-Info.plist`; defaults to the main bundle.
@@ -105,21 +105,20 @@ public final class ConductrTraceUploader: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - apiKey: The base64 key issued by the platform — the same key ``RailtownLogger`` uses.
-    ///   - apiBaseURL: Conductr API base URL. `/observe/exchange` is appended, so it must stop
-    ///     at `/api`.
+    ///   - apiBaseURL: Conductr host, e.g. `cndr.railtown.ai`. Supply the host only — the SDK owns
+    ///     the `/api/observe/exchange` path, so callers cannot drift from it when the endpoint
+    ///     moves. `https://` is assumed when no scheme is given, and a trailing slash is harmless.
     ///   - isInternalLoggingEnabled: Enables this type's diagnostics through `os.Logger`. Off by
     ///     default, matching ``RailtownOptions/isInternalLoggingEnabled``.
     /// - Throws: ``RailtownLoggerError/invalidAPIKey(reason:)`` when the key cannot be parsed, or
-    ///   `URLError(.badURL)` when `apiBaseURL` does not form a valid exchange URL.
+    ///   `URLError(.badURL)` when `apiBaseURL` is not a usable host.
     public func configure(
         apiKey: String,
         apiBaseURL: String,
         isInternalLoggingEnabled: Bool = false
     ) throws {
         let credentials = try Base64APIKeyParser().parse(apiKey)
-        guard let exchangeURL = URL(string: "\(apiBaseURL)/observe/exchange") else {
-            throw URLError(.badURL)
-        }
+        let exchangeURL = try Self.exchangeURL(forBaseURL: apiBaseURL)
         lock.lock()
         configuration = Configuration(
             apiKey: apiKey,
@@ -255,6 +254,31 @@ public final class ConductrTraceUploader: @unchecked Sendable {
 }
 
 private extension ConductrTraceUploader {
+
+    /// Path the exchange endpoint lives at, owned by the SDK rather than by the caller's
+    /// configuration: an integrator supplies the host, and this moves with the endpoint.
+    static let exchangePath = ["api", "observe", "exchange"]
+
+    /// Turns a configured host into the full exchange URL.
+    ///
+    /// Built with `appendingPathComponent` rather than string interpolation so a trailing slash on
+    /// the host cannot produce a doubled separator. A bare host such as `cndr.railtown.ai` parses
+    /// as a *relative* URL with no host, which `URLSession` would reject only at upload time, so
+    /// `https://` is assumed whenever no scheme is present and the result is checked here.
+    ///
+    /// - Throws: `URLError(.badURL)` when the host is empty, unparseable, or has no host component.
+    static func exchangeURL(forBaseURL apiBaseURL: String) throws -> URL {
+        let trimmed = apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw URLError(.badURL)
+        }
+        // Anything before a "://" is a scheme the caller chose; without one this is a bare host.
+        let absolute = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let baseURL = URL(string: absolute), baseURL.host != nil else {
+            throw URLError(.badURL)
+        }
+        return exchangePath.reduce(baseURL) { $0.appendingPathComponent($1) }
+    }
 
     /// Releases the subscription for `token`, if one is still held.
     ///

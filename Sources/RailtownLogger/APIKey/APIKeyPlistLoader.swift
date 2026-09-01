@@ -18,8 +18,8 @@ struct APIKeyPlistLoader: Sendable {
     /// Plist entry holding the base64 API key.
     static let apiKeyEntry = "API_KEY"
 
-    /// Plist entry holding the Conductr API base URL, used by trace uploads. Optional: only
-    /// ``ConductrTraceUploader`` reads it, and only when the caller passes no base URL.
+    /// Plist entry holding the Conductr host, e.g. `cndr.railtown.ai`. Optional: only
+    /// ``ConductrTraceUploader`` reads it, and only when the caller passes no host.
     static let apiBaseURLEntry = "API_BASE_URL"
 
     /// - Throws: ``RailtownLoggerError/invalidConfigurationPlist(reason:)`` when the

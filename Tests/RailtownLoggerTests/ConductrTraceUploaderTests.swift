@@ -12,23 +12,22 @@ import Testing
 @Suite(.serialized) struct ConductrTraceUploaderConfigurationTests {
     private let uploader = ConductrTraceUploader.shared
 
+    // MARK: - Plist resolution
+
     @Test func configuresFromThePlist() throws {
         let bundle = try TestFixtures.makeBundle(
             plistContents: ["API_KEY": TestFixtures.makeKey(), "API_BASE_URL": TestFixtures.baseURL]
         )
         try uploader.configure(bundle: bundle)
         #expect(uploader.isConfigured)
-        #expect(
-            uploader.configuredExchangeURL
-                == URL(string: "\(TestFixtures.baseURL)/observe/exchange")
-        )
+        #expect(uploader.configuredExchangeURL == TestFixtures.exchangeURL)
     }
 
     @Test func anExplicitBaseURLWinsOverThePlist() throws {
         let bundle = try TestFixtures.makeBundle(
             plistContents: ["API_KEY": TestFixtures.makeKey(), "API_BASE_URL": TestFixtures.baseURL]
         )
-        try uploader.configure(apiBaseURL: "https://other.example.com/api", bundle: bundle)
+        try uploader.configure(apiBaseURL: "other.example.com", bundle: bundle)
         #expect(
             uploader.configuredExchangeURL
                 == URL(string: "https://other.example.com/api/observe/exchange")
@@ -38,10 +37,7 @@ import Testing
     @Test func configuresFromAPlistWithoutABaseURLWhenOneIsPassed() throws {
         let bundle = try TestFixtures.makeBundle(plistContents: ["API_KEY": TestFixtures.makeKey()])
         try uploader.configure(apiBaseURL: TestFixtures.baseURL, bundle: bundle)
-        #expect(
-            uploader.configuredExchangeURL
-                == URL(string: "\(TestFixtures.baseURL)/observe/exchange")
-        )
+        #expect(uploader.configuredExchangeURL == TestFixtures.exchangeURL)
     }
 
     @Test func rejectsAPlistWithoutABaseURLWhenNoneIsPassed() throws {
@@ -64,6 +60,36 @@ import Testing
         )
         #expect(throws: RailtownLoggerError.self) {
             try uploader.configure(bundle: bundle)
+        }
+    }
+
+    // MARK: - Host resolution
+
+    /// Every spelling of the same host an integrator might type into the plist.
+    @Test(arguments: [
+        "https://conductr.example.com",
+        "conductr.example.com",
+        "https://conductr.example.com/",
+        "conductr.example.com/",
+        "  https://conductr.example.com  ",
+    ])
+    func resolvesTheExchangeURLFromAHost(_ apiBaseURL: String) throws {
+        try uploader.configure(apiKey: TestFixtures.makeKey(), apiBaseURL: apiBaseURL)
+        #expect(uploader.configuredExchangeURL == TestFixtures.exchangeURL)
+    }
+
+    @Test func keepsAnExplicitNonDefaultScheme() throws {
+        try uploader.configure(apiKey: TestFixtures.makeKey(), apiBaseURL: "http://localhost:8080")
+        #expect(
+            uploader.configuredExchangeURL
+                == URL(string: "http://localhost:8080/api/observe/exchange")
+        )
+    }
+
+    @Test(arguments: ["", "   ", "https://", "conductr example.com"])
+    func rejectsAnUnusableHost(_ apiBaseURL: String) throws {
+        #expect(throws: URLError.self) {
+            try uploader.configure(apiKey: TestFixtures.makeKey(), apiBaseURL: apiBaseURL)
         }
     }
 }

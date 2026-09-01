@@ -136,16 +136,23 @@ Apps using [RailtracksSwift](https://github.com/RailtownAI/Railtracks-swift) get
 
 `ConductrTraceUploader` uploads agent-run JSON traces. It is a separate pipeline from error logging — different endpoint, payload, and transport — but it takes the same API key, and it is set up the same way.
 
-**Bundled plist.** Add `API_BASE_URL` (the Conductr API base, stopping at `/api`) alongside `API_KEY` in the same `Railtown-Info.plist`, then configure with nothing in source:
+**Bundled plist.** Add `API_BASE_URL` alongside `API_KEY` in the same `Railtown-Info.plist` — the Conductr **host only**, since the SDK owns the rest of the path:
+
+```xml
+<key>API_BASE_URL</key>
+<string>cndr.railtown.ai</string>
+```
+
+`https://` is assumed when you leave the scheme off, so `cndr.railtown.ai` and `https://cndr.railtown.ai` are equivalent, and a trailing slash is harmless. Then configure with nothing in source:
 
 ```swift
 try ConductrTraceUploader.shared.configure()
 ```
 
-Pass a base URL to override the plist's — useful when it varies by build configuration:
+Pass a host to override the plist's — useful when it varies by build configuration:
 
 ```swift
-try ConductrTraceUploader.shared.configure(apiBaseURL: "https://<conductr-host>/api")
+try ConductrTraceUploader.shared.configure(apiBaseURL: "testcndr.railtown.ai")
 ```
 
 **Alternative — key in code.** Same escape hatch as the logger, for keys sourced elsewhere:
@@ -153,7 +160,7 @@ try ConductrTraceUploader.shared.configure(apiBaseURL: "https://<conductr-host>/
 ```swift
 try ConductrTraceUploader.shared.configure(
     apiKey: "<your API key>",
-    apiBaseURL: "https://<conductr-host>/api"
+    apiBaseURL: "cndr.railtown.ai"
 )
 ```
 
