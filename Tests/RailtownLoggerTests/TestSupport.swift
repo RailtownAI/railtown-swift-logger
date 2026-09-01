@@ -21,6 +21,9 @@ enum TestFixtures {
         return Data(json.utf8).base64EncodedString()
     }
 
+    /// Conductr API base URL for trace-upload tests; must stop at `/api`.
+    static let baseURL = "https://conductr.example.com/api"
+
     /// Credentials matching ``makeKey(host:)``, produced through the real parser.
     static func makeCredentials() throws -> RailtownCredentials {
         try Base64APIKeyParser().parse(makeKey())

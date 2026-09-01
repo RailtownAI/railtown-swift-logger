@@ -13,16 +13,19 @@ import Foundation
 /// `https://<host>`; this type exchanges the API key for a short-lived Azure SAS URL and PUTs a
 /// single trace file to it.
 ///
-/// Call ``configure(apiKey:apiBaseURL:isInternalLoggingEnabled:)`` before any uploads, then either
-/// hand it a file URL directly via ``uploadAgentRun(fileURL:)`` or subscribe to a publisher of
-/// trace-file URLs with ``subscribe(to:)-(AnyPublisher<URL,Never>)``.
+/// Configure before any uploads, then either hand it a file URL directly via
+/// ``uploadAgentRun(fileURL:)`` or subscribe to a publisher of trace-file URLs with
+/// ``subscribe(to:)-(AnyPublisher<URL,Never>)``.
 ///
-/// Credentials are **injected, not fetched**: this type deliberately knows nothing about where the
-/// key is stored, so it stays a drop-in for other projects. The cost is that callers must configure
-/// it — at launch *and* wherever the key can change, or a newly-entered key sits unused until the
-/// next launch. It has its own `configure` rather than sharing ``RailtownLogger/configure(apiKey:options:)``
-/// because `apiBaseURL` cannot be derived from the key: the log pipeline targets the ingestion host
-/// packed into the key, while the exchange endpoint lives under a separate API base.
+/// Setup mirrors ``RailtownLogger``'s: ``configure(apiBaseURL:isInternalLoggingEnabled:bundle:)``
+/// reads the key out of the bundled `Railtown-Info.plist`, and
+/// ``configure(apiKey:apiBaseURL:isInternalLoggingEnabled:)`` takes it from the caller — for apps
+/// that source the key some other way (remote config, their own storage), which also means
+/// reconfiguring wherever the key can change, or a newly-entered key sits unused until the next
+/// launch. It keeps its own `configure` rather than sharing
+/// ``RailtownLogger/configure(apiKey:options:)`` because `apiBaseURL` cannot be derived from the
+/// key: the log pipeline targets the ingestion host packed into the key, while the exchange
+/// endpoint lives under a separate API base.
 ///
 /// Not `@MainActor`-isolated — upload work runs on the cooperative pool, keeping network I/O off the
 /// main thread.
@@ -62,6 +65,39 @@ public final class ConductrTraceUploader: @unchecked Sendable {
     private var subscriptions: [UUID: AnyCancellable] = [:]
 
     private init() {}
+
+    /// Whether a `configure` call has succeeded — uploads are skipped until it has.
+    public var isConfigured: Bool {
+        currentConfiguration != nil
+    }
+
+    /// Supplies the credentials uploads need, reading the API key from the app's bundled
+    /// `Railtown-Info.plist` — the same file ``RailtownLogger/configure(options:bundle:)`` uses, so
+    /// both uploaders are set up the same way and neither needs a key in source.
+    ///
+    /// - Parameters:
+    ///   - apiBaseURL: Conductr API base URL. `/observe/exchange` is appended, so it must stop
+    ///     at `/api`. Omit it to take the plist's `API_BASE_URL` entry instead; passing one here
+    ///     wins over the plist.
+    ///   - isInternalLoggingEnabled: Enables this type's diagnostics through `os.Logger`. Off by
+    ///     default, matching ``RailtownOptions/isInternalLoggingEnabled``.
+    ///   - bundle: Where to look for `Railtown-Info.plist`; defaults to the main bundle.
+    /// - Throws: ``RailtownLoggerError/invalidConfigurationPlist(reason:)`` when the plist is
+    ///   missing or lacks an entry this call needs, ``RailtownLoggerError/invalidAPIKey(reason:)``
+    ///   when the key cannot be parsed, or `URLError(.badURL)` when the base URL does not form a
+    ///   valid exchange URL.
+    public func configure(
+        apiBaseURL: String? = nil,
+        isInternalLoggingEnabled: Bool = false,
+        bundle: Bundle = .main
+    ) throws {
+        let loader = APIKeyPlistLoader()
+        try configure(
+            apiKey: loader.apiKey(in: bundle),
+            apiBaseURL: apiBaseURL ?? loader.apiBaseURL(in: bundle),
+            isInternalLoggingEnabled: isInternalLoggingEnabled
+        )
+    }
 
     /// Supplies the credentials uploads need. Call once at launch with the stored key, and again
     /// whenever the user changes it — the value is cached here, so a key saved mid-session does
@@ -207,6 +243,14 @@ public final class ConductrTraceUploader: @unchecked Sendable {
             sourceURL: fileURL,
             log: log
         )
+    }
+
+    // MARK: - Internal (tests)
+
+    /// The exchange URL `configure` resolved, or `nil` when nothing is configured. Tests only —
+    /// the only way to see which base URL won.
+    var configuredExchangeURL: URL? {
+        currentConfiguration?.exchangeURL
     }
 }
 
