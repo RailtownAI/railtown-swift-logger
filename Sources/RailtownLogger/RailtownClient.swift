@@ -77,15 +77,15 @@ public final class RailtownClient: Sendable {
         self.dispatcher = dispatcher
         self.internalLog = internalLog
 
-        guard options.observesAppLifecycle else {
+        if options.observesAppLifecycle {
+            let timeout = options.flushTimeout
+            self.lifecycleObserver = AppLifecycleObserver(
+                internalLog: internalLog
+            ) { [dispatcher] in
+                await dispatcher.flush(timeout: timeout)
+            }
+        } else {
             self.lifecycleObserver = nil
-            return
-        }
-        let timeout = options.flushTimeout
-        self.lifecycleObserver = AppLifecycleObserver(
-            internalLog: internalLog
-        ) { [dispatcher] in
-            await dispatcher.flush(timeout: timeout)
         }
     }
 
