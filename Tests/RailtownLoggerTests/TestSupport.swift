@@ -88,6 +88,18 @@ actor MockHTTPClient: HTTPClient {
     }
 }
 
+/// Never answers, so a flush can only end by timing out.
+actor HangingHTTPClient: HTTPClient {
+    private(set) var requestCount = 0
+
+    func post(_ body: Data, to url: URL, headers: [String: String]) async throws -> HTTPResponse {
+        requestCount += 1
+        // Long enough that only cancellation ends it.
+        try await Task.sleep(seconds: 60)
+        return HTTPResponse(statusCode: 200, body: Data())
+    }
+}
+
 struct FixedDateProvider: DateProviding {
     let now: Date
 }
@@ -113,7 +125,7 @@ func eventually(
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
         if await condition() { return true }
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(seconds: 0.01)
     }
     return await condition()
 }

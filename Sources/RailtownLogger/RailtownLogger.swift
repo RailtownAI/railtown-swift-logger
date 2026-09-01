@@ -83,11 +83,15 @@ public enum RailtownLogger {
         store.client?.log(message, level: level, properties: properties)
     }
 
-    /// Uploads everything buffered, waiting for delivery — including retries — to
-    /// finish. Call from `scenePhase == .background` (or equivalent) to minimize
-    /// loss when the app is suspended. No-op until configured.
-    public static func flush() async {
-        await store.client?.flush()
+    /// Uploads everything buffered, giving up after `timeout` seconds
+    /// (default: ``RailtownOptions/flushTimeout``). Undelivered entries stay
+    /// buffered. No-op until configured.
+    ///
+    /// Backgrounding is handled automatically — see
+    /// ``RailtownOptions/observesAppLifecycle`` — so calling this by hand is only
+    /// needed at other moments of your choosing.
+    public static func flush(timeout: TimeInterval? = nil) async {
+        await store.client?.flush(timeout: timeout)
     }
 
     /// Automatic capture channel used by RailtracksSwift. No-op unless the app has

@@ -18,6 +18,9 @@ public final class RailtownClient: Sendable {
     private let dispatcher: any LogDispatching
     private let internalLog: InternalLog
 
+    /// Held for its lifetime: it deregisters its notification observers on deinit.
+    private let lifecycleObserver: AppLifecycleObserver?
+
     /// Creates a client from the `Railtown-Info.plist` bundled with the app — the
     /// Google-services configuration style. The plist needs a single `API_KEY`
     /// string entry holding the key copied from the Railtown platform.
@@ -73,6 +76,17 @@ public final class RailtownClient: Sendable {
         self.entryFactory = entryFactory
         self.dispatcher = dispatcher
         self.internalLog = internalLog
+
+        if options.observesAppLifecycle {
+            let timeout = options.flushTimeout
+            self.lifecycleObserver = AppLifecycleObserver(
+                internalLog: internalLog
+            ) { [dispatcher] in
+                await dispatcher.flush(timeout: timeout)
+            }
+        } else {
+            self.lifecycleObserver = nil
+        }
     }
 
     /// Reports an error at ``RailtownLogLevel/error`` level. The error's type,
@@ -113,9 +127,16 @@ public final class RailtownClient: Sendable {
         )
     }
 
-    /// Uploads everything buffered, waiting for delivery — including retries — to finish.
-    public func flush() async {
-        await dispatcher.flush()
+    /// Uploads everything buffered.
+    ///
+    /// Gives up after `timeout` seconds — defaulting to
+    /// ``RailtownOptions/flushTimeout`` — so a caller racing the system's
+    /// suspension deadline is never blocked indefinitely. Anything undelivered
+    /// stays buffered for the next attempt rather than being dropped.
+    ///
+    /// - Parameter timeout: Seconds to wait. `nil` uses the configured default.
+    public func flush(timeout: TimeInterval? = nil) async {
+        await dispatcher.flush(timeout: timeout ?? options.flushTimeout)
     }
 
     /// Automatic capture channel used by RailtracksSwift.
