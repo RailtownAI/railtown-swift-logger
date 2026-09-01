@@ -92,4 +92,22 @@ import Testing
             try uploader.configure(apiKey: TestFixtures.makeKey(), apiBaseURL: apiBaseURL)
         }
     }
+
+    // MARK: - Upload preconditions
+
+    /// A JSON array parses fine but is not the object shape a trace file must have. Rejected before
+    /// any network call, so this never leaves the process.
+    @Test func rejectsATraceFileThatIsNotAJSONObject() async throws {
+        try uploader.configure(apiKey: TestFixtures.makeKey(), apiBaseURL: TestFixtures.baseURL)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trace-\(UUID().uuidString).json")
+        try Data(#"["not", "an", "object"]"#.utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        await #expect(throws: RailtownLoggerError.invalidTracePayload(
+            reason: "The trace file does not hold a JSON object."
+        )) {
+            try await uploader.uploadAgentRun(fileURL: fileURL)
+        }
+    }
 }

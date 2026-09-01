@@ -59,6 +59,9 @@ public final class ConductrTraceUploader: @unchecked Sendable {
     private var configuration: Configuration?
     private var internalLog = InternalLog(isEnabled: false)
 
+    /// Stateless translator from a trace file's contents to the wire body. Needs no locking.
+    private let payloadMapper = ConductrTracePayloadMapper()
+
     /// Live trace subscriptions, keyed so a caller can drop its own without touching anyone else's.
     /// Entries remove themselves on completion; ``cancelSubscription(_:)`` clears the ones that will
     /// never complete because their run was cancelled.
@@ -219,16 +222,22 @@ public final class ConductrTraceUploader: @unchecked Sendable {
 
     /// Reads the flow-graph JSON at `fileURL`, maps it to the Conductr schema, and uploads it
     /// through a pre-signed SAS URL. `true` when the blob write returned HTTP 201.
+    ///
+    /// - Throws: ``RailtownLoggerError/notConfigured`` before `configure` has succeeded,
+    ///   ``RailtownLoggerError/invalidTracePayload(reason:)`` when the file does not hold a JSON
+    ///   object, or the underlying file-read, encoding, and transport errors.
     @discardableResult
     public func uploadAgentRun(fileURL: URL) async throws -> Bool {
         guard let configuration = currentConfiguration else {
-            throw URLError(.userAuthenticationRequired)
+            throw RailtownLoggerError.notConfigured
         }
         let log = currentLog
         let data = try Data(contentsOf: fileURL)
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             log.error("Failed to parse a JSON trace payload from file: \(fileURL)")
-            throw URLError(.cannotParseResponse)
+            throw RailtownLoggerError.invalidTracePayload(
+                reason: "The trace file does not hold a JSON object."
+            )
         }
         let credentials = configuration.credentials
         log.debug(
@@ -324,12 +333,12 @@ private extension ConductrTraceUploader {
         log: InternalLog
     ) async throws -> String {
         var request = URLRequest(url: configuration.exchangeURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("railtown-swift", forHTTPHeaderField: "User-Agent")
+        request.httpMethod = HTTP.Method.post
+        request.setValue(HTTP.ContentType.json, forHTTPHeaderField: HTTP.Header.contentType)
+        request.setValue(HTTP.userAgent, forHTTPHeaderField: HTTP.Header.userAgent)
         request.setValue(
-            "Bearer \(configuration.credentials.authenticationCode)",
-            forHTTPHeaderField: "Authorization"
+            HTTP.bearer(configuration.credentials.authenticationCode),
+            forHTTPHeaderField: HTTP.Header.authorization
         )
         // The endpoint takes the key itself as a JSON string body.
         request.httpBody = "\"\(configuration.apiKey)\"".data(using: .utf8)
@@ -356,13 +365,12 @@ private extension ConductrTraceUploader {
             throw URLError(.badURL)
         }
         var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("2022-11-02", forHTTPHeaderField: "x-ms-version")
-        request.setValue("BlockBlob", forHTTPHeaderField: "x-ms-blob-type")
+        request.httpMethod = HTTP.Method.put
+        request.setValue(HTTP.ContentType.plainTextUTF8, forHTTPHeaderField: HTTP.Header.contentType)
+        request.setValue(AzureBlob.apiVersion, forHTTPHeaderField: AzureBlob.Header.version)
+        request.setValue(AzureBlob.blockBlob, forHTTPHeaderField: AzureBlob.Header.blobType)
 
-        let run = (payload["runs"] as? [[String: Any]])?.first ?? [:]
-        let jsonData = try serializeOrdered(enrichRunWithSession(payload, run: run))
+        let jsonData = try payloadMapper.bodyData(for: payload)
         request.httpBody = jsonData
 
         log.debug(
@@ -372,7 +380,7 @@ private extension ConductrTraceUploader {
         let (responseData, response) = try await URLSession.shared.data(for: request)
         if let httpResponse = response as? HTTPURLResponse {
             let status = httpResponse.statusCode
-            let requestID = httpResponse.value(forHTTPHeaderField: "x-ms-request-id") ?? "?"
+            let requestID = httpResponse.value(forHTTPHeaderField: AzureBlob.Header.requestID) ?? "?"
             log.debug("Trace PUT status: \(status) | x-ms-request-id: \(requestID)")
             if status != 201, let body = String(data: responseData, encoding: .utf8) {
                 log.error("Trace PUT error body: \(body)")
@@ -380,73 +388,54 @@ private extension ConductrTraceUploader {
         }
         return (response as? HTTPURLResponse)?.statusCode == 201
     }
+}
 
-    // MARK: - Conductr JSON schema mapping
-    //
-    // Flattens the flow-graph trace into the shape the Conductr server expects; mirrors
-    // RailtownAI/handler.py.
-
-    func enrichRunWithSession(_ session: [String: Any], run: [String: Any]) -> [String: Any] {
-        let currentTime = Int(Date().timeIntervalSince1970 * 1000)
-        var enriched: [String: Any] = [:]
-
-        enriched["session_id"] = session["session_id"]
-        // Prefer flow_name, then name, then the id — `??` also skips the NSNull a JSON null decodes to.
-        enriched["session_name"] = (session["flow_name"] as? String)
-            ?? (session["name"] as? String)
-            ?? (session["session_id"] as? String)
-            ?? "Unknown Session"
-        enriched["session_start_time"] = session["start_time"]
-        enriched["session_end_time"] = session["end_time"]
-
-        enriched["run_id"] = run["run_id"]
-        enriched["run_name"] = run["name"]
-        enriched["run_start_time"] = run["start_time"] ?? currentTime
-        enriched["run_end_time"] = run["end_time"] ?? currentTime
-        enriched["run_status"] = run["status"] ?? "Unknown"
-
-        enriched["nodes"] = run["nodes"]
-        enriched["edges"] = run["edges"]
-        enriched["steps"] = run["steps"]
-
-        return enriched
+/// HTTP spellings shared by both requests this type makes.
+private enum HTTP {
+    enum Method {
+        static let post = "POST"
+        static let put = "PUT"
     }
 
-    /// Serializes with a fixed key order — the server reads the payload positionally in places, and
-    /// `JSONSerialization` gives no ordering guarantee, so the JSON is assembled by hand.
-    func serializeOrdered(_ data: [String: Any]) throws -> Data {
-        let keyOrder = [
-            "session_id", "session_name", "session_start_time", "session_end_time",
-            "run_id", "run_name", "run_start_time", "run_end_time", "run_status",
-            "nodes", "edges", "steps"
-        ]
-        var orderedPairs: [(String, Any)] = []
-        for key in keyOrder {
-            if let value = data[key] {
-                orderedPairs.append((key, value))
-            }
-        }
-        for (key, value) in data where !keyOrder.contains(key) {
-            orderedPairs.append((key, value))
-        }
-
-        var jsonString = "{"
-        for (index, (key, value)) in orderedPairs.enumerated() {
-            // Wrapped in an array so JSONSerialization accepts primitives (String, Int, NSNull…),
-            // then the brackets are stripped to leave just the value's JSON.
-            let wrapped = try JSONSerialization.data(withJSONObject: [value])
-            guard let wrappedString = String(data: wrapped, encoding: .utf8) else {
-                throw URLError(.cannotParseResponse)
-            }
-            jsonString += "\"\(key)\":\(String(wrappedString.dropFirst().dropLast()))"
-            if index < orderedPairs.count - 1 {
-                jsonString += ","
-            }
-        }
-        jsonString += "}"
-        guard let jsonData = jsonString.data(using: .utf8) else {
-            throw URLError(.cannotParseResponse)
-        }
-        return jsonData
+    enum Header {
+        static let authorization = "Authorization"
+        static let contentType = "Content-Type"
+        static let userAgent = "User-Agent"
     }
+
+    enum ContentType {
+        static let json = "application/json"
+
+        /// What the blob PUT declares. Not `application/json`: the SAS URL is issued for a blob the
+        /// server reads as text, and changing this changes how the stored blob is served back.
+        static let plainTextUTF8 = "text/plain; charset=utf-8"
+    }
+
+    /// Identifies this SDK to the exchange endpoint.
+    static let userAgent = "railtown-swift"
+
+    static func bearer(_ authenticationCode: String) -> String {
+        "Bearer \(authenticationCode)"
+    }
+}
+
+/// Azure Blob Storage's `x-ms-*` protocol, used only by the blob PUT. Kept apart from ``HTTP``
+/// because these answer to Azure's REST API rather than to anything Railtown serves.
+private enum AzureBlob {
+    enum Header {
+        static let blobType = "x-ms-blob-type"
+
+        /// Response header echoing Azure's id for the request — logged so a failed upload can be
+        /// traced in Azure's own diagnostics.
+        static let requestID = "x-ms-request-id"
+
+        static let version = "x-ms-version"
+    }
+
+    /// The REST API version the request is written against. Azure keys behavior off this, so it is
+    /// pinned rather than tracking whatever the service defaults to.
+    static let apiVersion = "2022-11-02"
+
+    /// Blob flavor to create: a block blob, written whole in this single PUT.
+    static let blockBlob = "BlockBlob"
 }
