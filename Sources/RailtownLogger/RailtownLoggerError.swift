@@ -12,4 +12,13 @@ public enum RailtownLoggerError: Error, Equatable, Sendable {
     /// The bundled `Railtown-Info.plist` is missing, unreadable, or has no usable
     /// `API_KEY` entry. The reason never echoes key material.
     case invalidConfigurationPlist(reason: String)
+
+    /// An agent-run trace could not be read or encoded for upload. The reason
+    /// describes the failure without echoing trace contents.
+    case invalidTracePayload(reason: String)
+
+    /// A trace upload was attempted before ``ConductrTraceUploader`` was configured.
+    /// Only that type throws this: the ``RailtownLogger`` capture calls are no-ops
+    /// until configured rather than failing.
+    case notConfigured
 }

@@ -33,6 +33,8 @@ and `"RailtownLogger"` to your target's dependencies. In Xcode: **File → Add P
 </plist>
 ```
 
+(A second entry, `API_BASE_URL`, is read only by trace uploads — see [Agent-run trace uploads](#agent-run-trace-uploads).)
+
 Then configure once before your app launches — no key in source:
 
 ```swift
@@ -129,6 +131,49 @@ all — surviving those needs on-disk spooling, which is not implemented yet.
 ## RailtracksSwift integration
 
 Apps using [RailtracksSwift](https://github.com/RailtownAI/Railtracks-swift) get automatic capture: any error escaping `flow.run(...)` is uploaded (flow title and Railtracks version attached) and rethrown unchanged. It activates when your app configures `RailtownLogger`; opt out with `capturesRailtracksErrors: false`.
+
+## Agent-run trace uploads
+
+`ConductrTraceUploader` uploads agent-run JSON traces. It is a separate pipeline from error logging — different endpoint, payload, and transport — but it takes the same API key, and it is set up the same way.
+
+**Bundled plist.** Add `API_BASE_URL` alongside `API_KEY` in the same `Railtown-Info.plist` — the Conductr **host only**, since the SDK owns the rest of the path:
+
+```xml
+<key>API_BASE_URL</key>
+<string>cndr.railtown.ai</string>
+```
+
+`https://` is assumed when you leave the scheme off, so `cndr.railtown.ai` and `https://cndr.railtown.ai` are equivalent, and a trailing slash is harmless. Then configure with nothing in source:
+
+```swift
+try ConductrTraceUploader.shared.configure()
+```
+
+Pass a host to override the plist's — useful when it varies by build configuration:
+
+```swift
+try ConductrTraceUploader.shared.configure(apiBaseURL: "testcndr.railtown.ai")
+```
+
+**Alternative — key in code.** Same escape hatch as the logger, for keys sourced elsewhere:
+
+```swift
+try ConductrTraceUploader.shared.configure(
+    apiKey: "<your API key>",
+    apiBaseURL: "cndr.railtown.ai"
+)
+```
+
+Configuration is cached, so call it again whenever the key changes — until you do, a newly-entered key sits unused. Then upload a trace file directly, or subscribe to a publisher that emits them:
+
+```swift
+try await ConductrTraceUploader.shared.uploadAgentRun(fileURL: traceFileURL)
+
+let token = ConductrTraceUploader.shared.subscribe(to: tracePublisher)
+defer { ConductrTraceUploader.shared.cancelSubscription(token) }
+```
+
+Subscribe *before* starting the work that writes the trace, and cancel in a `defer` around it: a run cancelled before it writes a trace never emits, and only the `defer` releases that subscription.
 
 ## Dependency injection
 

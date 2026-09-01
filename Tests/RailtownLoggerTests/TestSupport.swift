@@ -21,6 +21,12 @@ enum TestFixtures {
         return Data(json.utf8).base64EncodedString()
     }
 
+    /// Conductr host for trace-upload tests; the SDK appends the exchange path itself.
+    static let baseURL = "https://conductr.example.com"
+
+    /// The exchange URL ``baseURL`` must resolve to.
+    static let exchangeURL = URL(string: "https://conductr.example.com/api/observe/exchange")
+
     /// Credentials matching ``makeKey(host:)``, produced through the real parser.
     static func makeCredentials() throws -> RailtownCredentials {
         try Base64APIKeyParser().parse(makeKey())
