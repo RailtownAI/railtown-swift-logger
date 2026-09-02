@@ -96,17 +96,24 @@ public final class RailtownClient: Sendable {
     ///   - error: The error to report.
     ///   - message: Optional event message; defaults to the error's description.
     ///   - properties: Extra key–value context; wins over SDK-provided keys on conflict.
+    ///   - file: Filled in by the compiler — the calling file. Forward it only from a wrapper.
+    ///   - function: Filled in by the compiler — the calling function. Forward it only from a wrapper.
+    ///   - line: Filled in by the compiler — the calling line. Forward it only from a wrapper.
     public func capture(
         _ error: any Error,
         message: RailtownMessage? = nil,
-        properties: [String: String] = [:]
+        properties: [String: String] = [:],
+        file: String = #fileID,
+        function: String = #function,
+        line: Int = #line
     ) {
         stage(
             entryFactory.entry(
                 for: error,
                 message: message?.rendered,
                 level: .error,
-                extraProperties: properties
+                extraProperties: properties,
+                callSite: CallSite(file: file, function: function, line: line)
             )
         )
     }
@@ -117,13 +124,24 @@ public final class RailtownClient: Sendable {
     ///   - message: The message text.
     ///   - level: Severity; defaults to ``RailtownLogLevel/information``.
     ///   - properties: Extra key–value context; wins over SDK-provided keys on conflict.
+    ///   - file: Filled in by the compiler — the calling file. Forward it only from a wrapper.
+    ///   - function: Filled in by the compiler — the calling function. Forward it only from a wrapper.
+    ///   - line: Filled in by the compiler — the calling line. Forward it only from a wrapper.
     public func log(
         _ message: RailtownMessage,
         level: RailtownLogLevel = .information,
-        properties: [String: String] = [:]
+        properties: [String: String] = [:],
+        file: String = #fileID,
+        function: String = #function,
+        line: Int = #line
     ) {
         stage(
-            entryFactory.entry(message: message.rendered, level: level, extraProperties: properties)
+            entryFactory.entry(
+                message: message.rendered,
+                level: level,
+                extraProperties: properties,
+                callSite: CallSite(file: file, function: function, line: line)
+            )
         )
     }
 
@@ -148,11 +166,15 @@ public final class RailtownClient: Sendable {
     ///   - properties: Extra key–value context supplied by RailtracksSwift.
     ///   - stackTrace: Optional stack trace RailtracksSwift captured at the throw
     ///     site; when present it replaces the capture-site trace.
+    ///   - callSite: Where the error was raised, when RailtracksSwift recorded it.
+    ///     Explicit rather than compiler-filled: a default here would name the
+    ///     reporting code inside RailtracksSwift, not the code that failed.
     public func captureRailtracks(
         _ error: any Error,
         flowTitle: String,
         properties: [String: String] = [:],
-        stackTrace: [String]? = nil
+        stackTrace: [String]? = nil,
+        callSite: CallSite? = nil
     ) {
         guard options.capturesRailtracksErrors else {
             internalLog.debug("Railtracks auto-capture is disabled — ignoring a flow error.")
@@ -167,7 +189,8 @@ public final class RailtownClient: Sendable {
                 message: "RailtracksSwift flow '\(flowTitle)' failed",
                 level: .error,
                 extraProperties: merged,
-                throwSiteTrace: stackTrace
+                throwSiteTrace: stackTrace,
+                callSite: callSite
             )
         )
     }

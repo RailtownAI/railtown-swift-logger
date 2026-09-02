@@ -61,12 +61,21 @@ public enum RailtownLogger {
     ///   - error: The error to report.
     ///   - message: Optional event message; defaults to the error's description.
     ///   - properties: Extra key–value context; wins over SDK-provided keys on conflict.
+    ///   - file: Filled in by the compiler — the calling file. Forward it only from a wrapper.
+    ///   - function: Filled in by the compiler — the calling function. Forward it only from a wrapper.
+    ///   - line: Filled in by the compiler — the calling line. Forward it only from a wrapper.
     public static func capture(
         _ error: any Error,
         message: RailtownMessage? = nil,
-        properties: [String: String] = [:]
+        properties: [String: String] = [:],
+        file: String = #fileID,
+        function: String = #function,
+        line: Int = #line
     ) {
-        store.client?.capture(error, message: message, properties: properties)
+        store.client?.capture(
+            error, message: message, properties: properties,
+            file: file, function: function, line: line
+        )
     }
 
     /// Sends a plain message at the given level. No-op until configured.
@@ -75,12 +84,21 @@ public enum RailtownLogger {
     ///   - message: The message text.
     ///   - level: Severity; defaults to ``RailtownLogLevel/information``.
     ///   - properties: Extra key–value context; wins over SDK-provided keys on conflict.
+    ///   - file: Filled in by the compiler — the calling file. Forward it only from a wrapper.
+    ///   - function: Filled in by the compiler — the calling function. Forward it only from a wrapper.
+    ///   - line: Filled in by the compiler — the calling line. Forward it only from a wrapper.
     public static func log(
         _ message: RailtownMessage,
         level: RailtownLogLevel = .information,
-        properties: [String: String] = [:]
+        properties: [String: String] = [:],
+        file: String = #fileID,
+        function: String = #function,
+        line: Int = #line
     ) {
-        store.client?.log(message, level: level, properties: properties)
+        store.client?.log(
+            message, level: level, properties: properties,
+            file: file, function: function, line: line
+        )
     }
 
     /// Uploads everything buffered, giving up after `timeout` seconds
@@ -103,17 +121,20 @@ public enum RailtownLogger {
     ///   - properties: Extra key–value context supplied by RailtracksSwift.
     ///   - stackTrace: Optional stack trace RailtracksSwift captured at the throw
     ///     site; when present it replaces the capture-site trace.
+    ///   - callSite: Where the error was raised, when RailtracksSwift recorded it.
     public static func captureRailtracks(
         _ error: any Error,
         flowTitle: String,
         properties: [String: String] = [:],
-        stackTrace: [String]? = nil
+        stackTrace: [String]? = nil,
+        callSite: CallSite? = nil
     ) {
         store.client?.captureRailtracks(
             error,
             flowTitle: flowTitle,
             properties: properties,
-            stackTrace: stackTrace
+            stackTrace: stackTrace,
+            callSite: callSite
         )
     }
 
