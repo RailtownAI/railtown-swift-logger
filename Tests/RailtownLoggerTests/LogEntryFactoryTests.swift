@@ -102,4 +102,84 @@ import Testing
         )
         #expect(entry.exception?.count == 32_768)
     }
+
+    // MARK: - ErrorType
+
+    @Test func qualifiesAnEnumCaseCarryingAssociatedValues() {
+        #expect(errorType(of: TestError.boom("x")) == "RailtownLoggerTests.TestError.boom")
+    }
+
+    @Test func qualifiesAPayloadFreeEnumCase() {
+        #expect(
+            errorType(of: PayloadFreeError.somethingFailed)
+                == "RailtownLoggerTests.PayloadFreeError.somethingFailed"
+        )
+    }
+
+    /// `String(reflecting:)` hands back the custom text instead of `Type.case`, putting the case
+    /// name out of reach — so the bare type name is all that can be reported.
+    @Test func fallsBackToTheTypeNameForAnEnumWithACustomDescription() {
+        #expect(errorType(of: DescribedError.somethingFailed) == "RailtownLoggerTests.DescribedError")
+    }
+
+    /// Regression guard: a mirror's first child is a case name only for an enum. Without the
+    /// `displayStyle` check these reported the first *stored property* — `HTTPError.statusCode` —
+    /// an identifier that names no failure and shifts whenever the fields are reordered.
+    @Test func reportsTheBareTypeNameForAStructError() {
+        #expect(
+            errorType(of: HTTPError(statusCode: 500, body: "boom"))
+                == "RailtownLoggerTests.HTTPError"
+        )
+        #expect(
+            errorType(of: HTTPError(body: "boom", statusCode: 500))
+                == "RailtownLoggerTests.HTTPError",
+            "Field order must not change the grouping key."
+        )
+    }
+
+    @Test func reportsTheBareTypeNameForAClassError() {
+        #expect(errorType(of: ClassError()) == "RailtownLoggerTests.ClassError")
+    }
+
+    @Test func reportsTheBareTypeNameForABridgedNSError() {
+        #expect(errorType(of: NSError(domain: "TestDomain", code: 7)) == "NSError")
+    }
+
+    private func errorType(of error: any Error) -> String? {
+        factory.entry(for: error, message: nil, level: .error, extraProperties: [:])
+            .properties["ErrorType"]
+    }
+}
+
+// MARK: - ErrorType fixtures
+
+enum PayloadFreeError: Error {
+    case somethingFailed
+}
+
+enum DescribedError: Error, CustomStringConvertible {
+    case somethingFailed
+
+    var description: String { "a hand-written description" }
+}
+
+/// Two stored properties, so a mirror-child lookup would pick one of them arbitrarily.
+struct HTTPError: Error {
+    let statusCode: Int
+    let body: String
+
+    init(statusCode: Int, body: String) {
+        self.statusCode = statusCode
+        self.body = body
+    }
+
+    /// Same fields, declared in the other order at the call site.
+    init(body: String, statusCode: Int) {
+        self.statusCode = statusCode
+        self.body = body
+    }
+}
+
+final class ClassError: Error {
+    let code = 3
 }

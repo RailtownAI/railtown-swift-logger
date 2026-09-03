@@ -98,11 +98,15 @@ struct LogEntryFactory: Sendable {
     ///   dead end: `String(reflecting:)` returns that text instead, and the case name isn't
     ///   reachable. Those fall back to the bare type name, as before.
     ///
-    /// Not restricted to enums: a struct or class error has no mirror-child case name and no
-    /// dotted reflection, so it falls back to the type name too.
+    /// Struct and class errors fall back to the bare type name. The enum check is load-bearing:
+    /// a mirror's first child is the case name *only* for an enum, and for a struct or class it is
+    /// the first stored property, which would yield `HTTPError.statusCode` — a name that says
+    /// nothing about the failure and, worse, changes whenever a consumer reorders their fields,
+    /// splitting one error's history across a release.
     private static func qualifiedErrorType(of error: any Error) -> String {
         let typeName = String(reflecting: type(of: error))
-        if let caseName = Mirror(reflecting: error).children.first?.label {
+        let mirror = Mirror(reflecting: error)
+        if mirror.displayStyle == .enum, let caseName = mirror.children.first?.label {
             return "\(typeName).\(caseName)"
         }
         let reflected = String(reflecting: error)
