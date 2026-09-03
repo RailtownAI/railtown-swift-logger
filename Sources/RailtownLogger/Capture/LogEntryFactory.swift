@@ -52,7 +52,7 @@ struct LogEntryFactory: Sendable {
         extraProperties: [String: String],
         throwSiteTrace: [String]? = nil
     ) -> LogEntry {
-        let errorType = String(reflecting: type(of: error))
+        let errorType = Self.qualifiedErrorType(of: error)
         // String(describing:) preserves enum case names and associated values,
         // where localizedDescription collapses most Swift errors to a generic sentence.
         let headline = "\(errorType): \(String(describing: error))"
@@ -83,6 +83,33 @@ struct LogEntryFactory: Sendable {
             properties: properties,
             exception: exception
         )
+    }
+    
+    /// The error's type, qualified with its enum case when one can be recovered —
+    /// `RailtracksSwift.RTSError.missingAPIKey` rather than `RailtracksSwift.RTSError`.
+    ///
+    /// The case is what identifies *which* failure happened; the type alone groups every failure a
+    /// module can produce into one bucket. Three shapes, in the order tried:
+    ///
+    /// - A case with associated values reports its name as the single child of a `Mirror`.
+    /// - A payload-free case has no mirror children, but `String(reflecting:)` renders it as
+    ///   `Module.Type.caseName`, so the reflected value is already what's wanted.
+    /// - A payload-free case on a type defining its own `description` or `debugDescription` is a
+    ///   dead end: `String(reflecting:)` returns that text instead, and the case name isn't
+    ///   reachable. Those fall back to the bare type name, as before.
+    ///
+    /// Not restricted to enums: a struct or class error has no mirror-child case name and no
+    /// dotted reflection, so it falls back to the type name too.
+    private static func qualifiedErrorType(of error: any Error) -> String {
+        let typeName = String(reflecting: type(of: error))
+        if let caseName = Mirror(reflecting: error).children.first?.label {
+            return "\(typeName).\(caseName)"
+        }
+        let reflected = String(reflecting: error)
+        guard reflected.hasPrefix(typeName + ".") else {
+            return typeName
+        }
+        return reflected
     }
 
     /// Renders a plain message event (no stack trace).
