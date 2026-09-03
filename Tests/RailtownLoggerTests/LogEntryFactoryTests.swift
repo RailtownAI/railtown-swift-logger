@@ -145,6 +145,44 @@ import Testing
         #expect(errorType(of: NSError(domain: "TestDomain", code: 7)) == "NSError")
     }
 
+    // MARK: - ErrorType stability for non-internal types
+    //
+    // `String(reflecting:)` renders these with a mangled context holding a pointer that is
+    // reassigned every launch — `RailtownLoggerTests.(unknown context at $10f2c9b4).Foo`. Left in,
+    // it makes ErrorType a fresh value per app run, fragmenting one error across every launch.
+    // The literals below therefore also assert that no `$` address survives.
+
+    @Test func stripsTheMangledContextFromAPrivateType() {
+        #expect(
+            errorType(of: PrivateFixtureError.somethingFailed)
+                == "RailtownLoggerTests.PrivateFixtureError.somethingFailed"
+        )
+    }
+
+    @Test func stripsTheMangledContextFromAFilePrivateTypeCarryingAPayload() {
+        #expect(
+            errorType(of: FilePrivateFixtureError.somethingFailed(code: 3))
+                == "RailtownLoggerTests.FilePrivateFixtureError.somethingFailed"
+        )
+    }
+
+    /// A type declared inside a function carries *two* context segments, so a fix that stripped
+    /// only one would leave an address behind.
+    @Test func stripsEveryMangledContextFromAFunctionLocalType() {
+        #expect(
+            errorType(of: makeFunctionLocalError())
+                == "RailtownLoggerTests.FunctionLocalError.somethingFailed"
+        )
+    }
+
+    /// The strip splits on `.` and rejoins, so a generic parameter's own dots must survive.
+    @Test func leavesAGenericTypeNameIntact() {
+        #expect(
+            errorType(of: GenericFixtureError(value: 1))
+                == "RailtownLoggerTests.GenericFixtureError<Swift.Int>"
+        )
+    }
+
     private func errorType(of error: any Error) -> String? {
         factory.entry(for: error, message: nil, level: .error, extraProperties: [:])
             .properties["ErrorType"]
@@ -182,4 +220,27 @@ struct HTTPError: Error {
 
 final class ClassError: Error {
     let code = 3
+}
+
+/// Deliberately `private`/`fileprivate`: these render with a mangled context, which is the whole
+/// point of the stability tests above. Every other fixture here is internal so its name is stable.
+private enum PrivateFixtureError: Error {
+    case somethingFailed
+}
+
+fileprivate enum FilePrivateFixtureError: Error {
+    case somethingFailed(code: Int)
+}
+
+struct GenericFixtureError<Value: Sendable>: Error {
+    let value: Value
+}
+
+/// A function-scope type: rendered with *two* mangled context segments, unlike one declared
+/// inside a suite's method, which Swift qualifies with the suite name instead.
+func makeFunctionLocalError() -> any Error {
+    enum FunctionLocalError: Error {
+        case somethingFailed
+    }
+    return FunctionLocalError.somethingFailed
 }

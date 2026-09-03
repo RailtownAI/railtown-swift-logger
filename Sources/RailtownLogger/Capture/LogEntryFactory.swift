@@ -106,14 +106,37 @@ struct LogEntryFactory: Sendable {
     private static func qualifiedErrorType(of error: any Error) -> String {
         let typeName = String(reflecting: type(of: error))
         let mirror = Mirror(reflecting: error)
+        let qualified: String
         if mirror.displayStyle == .enum, let caseName = mirror.children.first?.label {
-            return "\(typeName).\(caseName)"
+            qualified = "\(typeName).\(caseName)"
+        } else {
+            let reflected = String(reflecting: error)
+            // Both are rendered from the same type, so the prefix check compares like with like —
+            // which is why the mangled context is stripped below rather than from `typeName` here.
+            qualified = reflected.hasPrefix(typeName + ".") ? reflected : typeName
         }
-        let reflected = String(reflecting: error)
-        guard reflected.hasPrefix(typeName + ".") else {
-            return typeName
+        return withoutMangledContext(qualified)
+    }
+
+    /// `name` with the mangled context Swift renders for non-internal types removed —
+    /// `App.(unknown context at $114acc9b4).MyError` becomes `App.MyError`.
+    ///
+    /// That context holds a **pointer**, freshly assigned each launch, so a `private` or
+    /// `fileprivate` error type — an ordinary way to declare one — would otherwise report a
+    /// different `ErrorType` every run and scatter one failure across a bucket per app launch.
+    /// A function-local type carries two such segments, so every component is filtered, not one.
+    ///
+    /// - Note: The tradeoff is that two same-named private types in different files of one module
+    ///   collapse to a single key. That is the better failure: a rare collision between distinct
+    ///   errors, rather than guaranteed fragmentation of every private one.
+    private static func withoutMangledContext(_ name: String) -> String {
+        guard name.contains("(unknown context at") else {
+            return name
         }
-        return reflected
+        return name
+            .split(separator: ".", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("(unknown context at") }
+            .joined(separator: ".")
     }
 
     /// Renders a plain message event (no stack trace).
