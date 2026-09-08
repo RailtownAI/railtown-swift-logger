@@ -56,7 +56,7 @@ struct LogEntryFactory: Sendable {
         throwSiteTrace: [String]? = nil,
         callSite: CallSite? = nil
     ) -> LogEntry {
-        let errorType = String(reflecting: type(of: error))
+        let errorType = Self.qualifiedErrorType(of: error)
         // String(describing:) preserves enum case names and associated values,
         // where localizedDescription collapses most Swift errors to a generic sentence.
         let headline = "\(errorType): \(String(describing: error))"
@@ -88,6 +88,60 @@ struct LogEntryFactory: Sendable {
             properties: properties,
             exception: exception
         )
+    }
+    
+    /// The error's type, qualified with its enum case when one can be recovered —
+    /// `RailtracksSwift.RTSError.missingAPIKey` rather than `RailtracksSwift.RTSError`.
+    ///
+    /// The case is what identifies *which* failure happened; the type alone groups every failure a
+    /// module can produce into one bucket. Three shapes, in the order tried:
+    ///
+    /// - A case with associated values reports its name as the single child of a `Mirror`.
+    /// - A payload-free case has no mirror children, but `String(reflecting:)` renders it as
+    ///   `Module.Type.caseName`, so the reflected value is already what's wanted.
+    /// - A payload-free case on a type defining its own `description` or `debugDescription` is a
+    ///   dead end: `String(reflecting:)` returns that text instead, and the case name isn't
+    ///   reachable. Those fall back to the bare type name, as before.
+    ///
+    /// Struct and class errors fall back to the bare type name. The enum check is load-bearing:
+    /// a mirror's first child is the case name *only* for an enum, and for a struct or class it is
+    /// the first stored property, which would yield `HTTPError.statusCode` — a name that says
+    /// nothing about the failure and, worse, changes whenever a consumer reorders their fields,
+    /// splitting one error's history across a release.
+    private static func qualifiedErrorType(of error: any Error) -> String {
+        let typeName = String(reflecting: type(of: error))
+        let mirror = Mirror(reflecting: error)
+        let qualified: String
+        if mirror.displayStyle == .enum, let caseName = mirror.children.first?.label {
+            qualified = "\(typeName).\(caseName)"
+        } else {
+            let reflected = String(reflecting: error)
+            // Both are rendered from the same type, so the prefix check compares like with like —
+            // which is why the mangled context is stripped below rather than from `typeName` here.
+            qualified = reflected.hasPrefix(typeName + ".") ? reflected : typeName
+        }
+        return withoutMangledContext(qualified)
+    }
+
+    /// `name` with the mangled context Swift renders for non-internal types removed —
+    /// `App.(unknown context at $114acc9b4).MyError` becomes `App.MyError`.
+    ///
+    /// That context holds a **pointer**, freshly assigned each launch, so a `private` or
+    /// `fileprivate` error type — an ordinary way to declare one — would otherwise report a
+    /// different `ErrorType` every run and scatter one failure across a bucket per app launch.
+    /// A function-local type carries two such segments, so every component is filtered, not one.
+    ///
+    /// - Note: The tradeoff is that two same-named private types in different files of one module
+    ///   collapse to a single key. That is the better failure: a rare collision between distinct
+    ///   errors, rather than guaranteed fragmentation of every private one.
+    private static func withoutMangledContext(_ name: String) -> String {
+        guard name.contains("(unknown context at") else {
+            return name
+        }
+        return name
+            .split(separator: ".", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("(unknown context at") }
+            .joined(separator: ".")
     }
 
     /// Renders a plain message event (no stack trace).
