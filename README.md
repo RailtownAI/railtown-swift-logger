@@ -95,6 +95,16 @@ do {
 RailtownLogger.log("Sync finished", level: .information, properties: ["Items": "\(count)"])
 ```
 
+Every `capture` and `log` call also records **where it was written** — file, function and line — through compiler default arguments (`#fileID`, `#function`, `#line`), uploaded as the `SourceFile`, `SourceFunction` and `SourceLine` properties alongside the app and OS versions. Unlike stack-trace symbols these survive symbol stripping, so they identify the call site even in App Store builds. `#fileID` is used rather than `#file`, so no absolute build path from your machine is uploaded.
+
+If you wrap the SDK in your own helper, forward the position so the report points at *your* caller rather than the wrapper:
+
+```swift
+func report(_ error: Error, file: String = #fileID, function: String = #function, line: Int = #line) {
+    RailtownLogger.capture(error, file: file, function: function, line: line)
+}
+```
+
 Capture calls are synchronous and never wait on the network — entries are staged on the calling thread and uploaded in batches in the background. Before `configure` succeeds, every call is a safe no-op.
 
 The stack trace is captured by the SDK (`Thread.callStackSymbols`) at the moment of the `capture` call, so callers never assemble one; it uploads in the event's `Exception` field together with the error's type and description. Note that in `async` code the frames above the current suspension point belong to the concurrency runtime; the structured properties (`ErrorType`, `ErrorDescription`, app and OS versions, plus your own) carry the reliable context. The SDK's own version is not among them — it travels separately as the envelope's `ClientVersion`.

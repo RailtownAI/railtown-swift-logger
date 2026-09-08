@@ -12,7 +12,7 @@ import Foundation
 struct LogEntryFactory: Sendable {
     /// Caps guarding against pathological inputs producing megabyte uploads.
     ///
-    /// Note the interaction with ``entry(for:message:level:extraProperties:throwSiteTrace:)``:
+    /// Note the interaction with ``entry(for:message:level:extraProperties:throwSiteTrace:callSite:)``:
     /// `exception` is assembled as the error headline followed by the stack trace, then
     /// truncated with `prefix`, which keeps the front. An error whose `String(describing:)`
     /// output approaches `maxMessageLength` therefore crowds the frames out of the upload
@@ -43,14 +43,18 @@ struct LogEntryFactory: Sendable {
     /// `message`, the error type + description + stack trace as `exception`, and
     /// structured context in the properties.
     ///
-    /// - Parameter throwSiteTrace: Optional trace captured at the throw site by the
-    ///   caller; when present it replaces this call site's stack.
+    /// - Parameters:
+    ///   - throwSiteTrace: Optional trace captured at the throw site by the caller;
+    ///     when present it replaces this call site's stack.
+    ///   - callSite: Where the event originated; uploaded as the `SourceFile`,
+    ///     `SourceFunction` and `SourceLine` properties when present.
     func entry(
         for error: any Error,
         message: String?,
         level: RailtownLogLevel,
         extraProperties: [String: String],
-        throwSiteTrace: [String]? = nil
+        throwSiteTrace: [String]? = nil,
+        callSite: CallSite? = nil
     ) -> LogEntry {
         let errorType = String(reflecting: type(of: error))
         // String(describing:) preserves enum case names and associated values,
@@ -75,6 +79,7 @@ struct LogEntryFactory: Sendable {
         var properties = contextProvider.contextProperties()
         properties["ErrorType"] = errorType
         properties["ErrorDescription"] = error.localizedDescription
+        callSite?.merge(into: &properties)
         properties.merge(extraProperties) { _, callerValue in callerValue }
 
         return makeEntry(
@@ -89,9 +94,11 @@ struct LogEntryFactory: Sendable {
     func entry(
         message: String,
         level: RailtownLogLevel,
-        extraProperties: [String: String]
+        extraProperties: [String: String],
+        callSite: CallSite? = nil
     ) -> LogEntry {
         var properties = contextProvider.contextProperties()
+        callSite?.merge(into: &properties)
         properties.merge(extraProperties) { _, callerValue in callerValue }
         return makeEntry(message: message, level: level, properties: properties)
     }
