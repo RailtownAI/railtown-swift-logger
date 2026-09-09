@@ -82,7 +82,7 @@ public final class ConductrTraceUploader: @unchecked Sendable {
     ///   - apiBaseURL: Conductr host, e.g. `cndr.railtown.ai` — the scheme is optional and the
     ///     path is not yours to supply; see the `apiKey` overload. Omit it to take the plist's
     ///     `API_BASE_URL` entry instead; passing one here wins over the plist.
-    ///   - isInternalLoggingEnabled: Enables this type's diagnostics through `os.Logger`. Off by
+    ///   - isInternalLoggingEnabled: Enables this type's diagnostics through swift-log. Off by
     ///     default, matching ``RailtownOptions/isInternalLoggingEnabled``.
     ///   - bundle: Where to look for `Railtown-Info.plist`; defaults to the main bundle.
     /// - Throws: ``RailtownLoggerError/invalidConfigurationPlist(reason:)`` when the plist is
@@ -111,7 +111,7 @@ public final class ConductrTraceUploader: @unchecked Sendable {
     ///   - apiBaseURL: Conductr host, e.g. `cndr.railtown.ai`. Supply the host only — the SDK owns
     ///     the `/api/observe/exchange` path, so callers cannot drift from it when the endpoint
     ///     moves. `https://` is assumed when no scheme is given, and a trailing slash is harmless.
-    ///   - isInternalLoggingEnabled: Enables this type's diagnostics through `os.Logger`. Off by
+    ///   - isInternalLoggingEnabled: Enables this type's diagnostics through swift-log. Off by
     ///     default, matching ``RailtownOptions/isInternalLoggingEnabled``.
     /// - Throws: ``RailtownLoggerError/invalidAPIKey(reason:)`` when the key cannot be parsed, or
     ///   `URLError(.badURL)` when `apiBaseURL` is not a usable host.

@@ -6,7 +6,7 @@ Swift SDK for [Railtown AI](https://railtown.ai) error collection: capture error
 
 - Swift 6 (tools 6.3)
 - iOS 15+ / macOS 12+ / tvOS 15+ / watchOS 8+ / visionOS 1+
-- No external dependencies
+- One dependency: [swift-log](https://github.com/apple/swift-log), the same logging stack RailtracksSwift uses
 
 ## Installation
 
@@ -71,7 +71,7 @@ try RailtownLogger.configure(
         maxBatchSize: 20,               // entries per upload
         maxBufferedEntries: 500,        // buffer cap; oldest dropped beyond it
         maxRetryAttempts: 5,            // delivery attempts before a batch is dropped
-        isInternalLoggingEnabled: false,// SDK diagnostics via os.Logger
+        isInternalLoggingEnabled: false,// SDK diagnostics via swift-log
         flushTimeout: 5,                // seconds an explicit flush waits before giving up
         observesAppLifecycle: true      // flush automatically on background/terminate
     )
@@ -108,6 +108,10 @@ func report(_ error: Error, file: String = #fileID, function: String = #function
 Capture calls are synchronous and never wait on the network — entries are staged on the calling thread and uploaded in batches in the background. Before `configure` succeeds, every call is a safe no-op.
 
 The stack trace is captured by the SDK (`Thread.callStackSymbols`) at the moment of the `capture` call, so callers never assemble one; it uploads in the event's `Exception` field together with the error's type and description. Note that in `async` code the frames above the current suspension point belong to the concurrency runtime; the structured properties (`ErrorType`, `ErrorDescription`, app and OS versions, plus your own) carry the reliable context. The SDK's own version is not among them — it travels separately as the envelope's `ClientVersion`.
+
+## SDK diagnostics
+
+With `isInternalLoggingEnabled: true` the SDK reports its own activity — batches uploaded, flushes timed out, entries dropped — through [swift-log](https://github.com/apple/swift-log) under the label `railtown.swift.logger.log`, the same stack RailtracksSwift uses (`railtracks.swift.log`). Your app decides where that output goes with a single `LoggingSystem.bootstrap`; the default handler writes to stdout. Note that this is **not** the unified log, so these lines do not show up in Console.app or `log stream` unless you install an OSLog-backed handler. API-key material is never logged.
 
 ## Flushing
 
