@@ -26,18 +26,10 @@ struct InternalLog: Sendable {
     private let logger: Logger
 
     init(isEnabled: Bool) {
-        self.init(isEnabled: isEnabled, logger: Logger(label: RailtownLoggers.logLabel))
-    }
-
-    /// Injectable seam: tests hand in a `Logger` built on a recording handler.
-    init(isEnabled: Bool, logger: Logger) {
-        var logger = logger
+        var logger = Logger(label: RailtownLoggers.logLabel)
         logger.logLevel = isEnabled ? .debug : .critical
         self.logger = logger
     }
-
-    /// The effective floor — exposed for tests.
-    var logLevel: Logger.Level { logger.logLevel }
 
     func debug(_ message: String) {
         logger.debug("\(message)")
