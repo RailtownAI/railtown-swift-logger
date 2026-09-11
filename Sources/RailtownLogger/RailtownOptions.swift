@@ -22,7 +22,9 @@ public struct RailtownOptions: Sendable {
     /// Number of delivery attempts for a batch before it is dropped.
     public var maxRetryAttempts: Int
 
-    /// Enables the SDK's own diagnostic logging through `os.Logger`. Off by default.
+    /// Enables the SDK's own diagnostic logging through swift-log (label
+    /// `railtown.swift.logger.log`); the host app's `LoggingSystem` decides where it
+    /// goes. Off by default.
     public var isInternalLoggingEnabled: Bool
 
     /// Whether the SDK flushes automatically when the app backgrounds or
